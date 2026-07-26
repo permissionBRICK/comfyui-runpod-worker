@@ -5,5 +5,5 @@
 #   - comfyui-tooling-nodes: ETN_LoadImageBase64 (avatar + reference image injection)
 # Models are NOT baked in - they live on the RunPod network volume under
 # /runpod-volume/models/{unet,clip,vae,loras,checkpoints} and are auto-detected.
-FROM runpod/worker-comfyui:latest-base
+FROM runpod/worker-comfyui:5.8.6-base
 RUN comfy-node-install comfyui-gguf comfyui-tooling-nodes
