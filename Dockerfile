@@ -15,3 +15,8 @@ RUN git clone -q --depth 1 https://github.com/city96/ComfyUI-GGUF /comfyui/custo
 
 # Boot-time model downloader (MODEL_MANIFEST / MODELS env), used by lazy pods.
 COPY boot-models.py /boot-models.py
+
+# In-pod model manager: lets the runpod-lazy proxy add/swap models on a RUNNING
+# pod (port 8189) instead of recreating it. LRU-evicts old models when the disk
+# is full. Started by the pod start command alongside ComfyUI.
+COPY model-manager.py /model-manager.py
