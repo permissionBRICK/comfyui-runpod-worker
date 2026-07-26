@@ -164,7 +164,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(404, {'error': 'not found'})
         try:
             length = int(self.headers.get('Content-Length') or 0)
-            files = json.loads(self.rfile.read(length) or b'{}').get('files', [])
+            body = json.loads(self.rfile.read(length) or b'{}')
+            files = body.get('files', [])
+            priority = bool(body.get('priority'))
         except Exception as err:
             return self._reply(400, {'error': str(err)})
         dests = [f['dest'].lstrip('/') for f in files]
@@ -173,13 +175,19 @@ class Handler(BaseHTTPRequestHandler):
         queued = []
         with state['lock']:
             pending = {e['dest'].lstrip('/') for e in state['queue']} | set(state['downloading'])
+            fresh = []
             for f in files:
                 dest = f['dest'].lstrip('/')
                 if dest in present or dest in pending:
                     continue
                 state['errors'].pop(dest, None)
-                state['queue'].append(f)
+                fresh.append(f)
                 queued.append(dest)
+            if priority:
+                # A model switch jumps ahead of background prefetch downloads.
+                state['queue'][:0] = fresh
+            else:
+                state['queue'].extend(fresh)
         if queued:
             log('queued:', ', '.join(queued))
         self._reply(200, {'queued': queued, 'present': sorted(present & set(dests))})
