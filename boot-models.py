@@ -77,11 +77,22 @@ def download(entry):
     print(f'boot-models: OK {dest} ({done / 1e9:.1f}GB in {time.time() - started:.0f}s)', flush=True)
 
 
+def download_with_retries(entry, attempts=3):
+    for attempt in range(1, attempts + 1):
+        try:
+            return download(entry)
+        except Exception as err:
+            print(f'boot-models: attempt {attempt}/{attempts} failed for {entry["dest"]}: {err}', flush=True)
+            if attempt == attempts:
+                raise
+            time.sleep(10 * attempt)
+
+
 def main():
     todo = entries()
     print(f'boot-models: {len(todo)} files', flush=True)
     for entry in todo:
-        download(entry)
+        download_with_retries(entry)
     print('boot-models: READY', flush=True)
 
 
