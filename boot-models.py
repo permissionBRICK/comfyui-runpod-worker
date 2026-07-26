@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get('COMFY_MODELS_ROOT', '/comfyui/models'))
 HF_TOKEN = os.environ.get('HF_TOKEN', '')
+CIVITAI_TOKEN = os.environ.get('CIVITAI_TOKEN', '')
 
 LEGACY = [
     {'group': 'flux', 'url': 'https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-BF16.gguf',
@@ -49,8 +50,11 @@ def download(entry):
         return
     final.parent.mkdir(parents=True, exist_ok=True)
     part = final.with_suffix(final.suffix + '.part')
-    req = urllib.request.Request(entry['url'])
-    if HF_TOKEN and 'huggingface.co' in entry['url']:
+    url = entry['url']
+    if CIVITAI_TOKEN and 'civitai.com' in url:
+        url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
+    req = urllib.request.Request(url)
+    if HF_TOKEN and 'huggingface.co' in url:
         req.add_header('Authorization', f'Bearer {HF_TOKEN}')
     digest = hashlib.sha256()
     done = 0
