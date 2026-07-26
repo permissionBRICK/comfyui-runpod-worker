@@ -11,6 +11,7 @@ are kept. Legacy MODELS=flux|qwen|all group mode remains as fallback.
 import hashlib
 import json
 import os
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,10 @@ ROOT = Path(os.environ.get('COMFY_MODELS_ROOT', '/comfyui/models'))
 HF_TOKEN = os.environ.get('HF_TOKEN', '')
 CIVITAI_TOKEN = os.environ.get('CIVITAI_TOKEN', '')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
+# CDNs serve ~10-20MB/s per connection for cache-cold files; ranged parallel
+# segments multiply that. 1 disables.
+SEGMENTS = int(os.environ.get('DOWNLOAD_SEGMENTS', '8'))
+SEGMENT_MIN_BYTES = 1024 ** 3  # single stream below 1GB
 
 
 class _Redirect(Exception):
@@ -31,22 +36,24 @@ class _RaiseOnRedirect(urllib.request.HTTPRedirectHandler):
         raise _Redirect(newurl)
 
 
-def open_stream(url):
+def open_stream(url, headers=None):
     """Opens a download stream with per-host auth. GitHub release assets 302 to
     a signed CDN URL that must be fetched WITHOUT the Authorization header."""
+    extra = dict(headers or {})
     if CIVITAI_TOKEN and ('civitai.com' in url or 'civitai.red' in url):
         url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
     if GITHUB_TOKEN and 'api.github.com' in url:
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {GITHUB_TOKEN}',
             'Accept': 'application/octet-stream',
+            **extra,
         })
         opener = urllib.request.build_opener(_RaiseOnRedirect())
         try:
             return opener.open(req, timeout=180)
         except _Redirect as r:
-            return urllib.request.urlopen(r.url, timeout=180)
-    req = urllib.request.Request(url)
+            return urllib.request.urlopen(urllib.request.Request(r.url, headers=extra), timeout=180)
+    req = urllib.request.Request(url, headers=extra)
     if HF_TOKEN and 'huggingface.co' in url:
         req.add_header('Authorization', f'Bearer {HF_TOKEN}')
     return urllib.request.urlopen(req, timeout=180)
@@ -73,25 +80,22 @@ def entries():
     return [e for e in LEGACY if 'all' in groups or e['group'] in groups]
 
 
-def download(entry):
-    dest = entry['dest'].lstrip('/')
-    final = ROOT / dest
-    size = entry.get('size')
-    if final.exists() and (final.stat().st_size == size if size else final.stat().st_size > 0):
-        print(f'boot-models: SKIP {dest}', flush=True)
-        return
-    final.parent.mkdir(parents=True, exist_ok=True)
-    part = final.with_suffix(final.suffix + '.part')
-    url = entry['url']
-    if CIVITAI_TOKEN and ('civitai.com' in url or 'civitai.red' in url):
-        url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
-    req = urllib.request.Request(url)
-    if HF_TOKEN and 'huggingface.co' in url:
-        req.add_header('Authorization', f'Bearer {HF_TOKEN}')
+def _probe(url):
+    """Returns (size, accepts_ranges) via a 1-byte ranged request."""
+    try:
+        with open_stream(url, {'Range': 'bytes=0-0'}) as resp:
+            cr = resp.headers.get('Content-Range', '')
+            if resp.status == 206 and '/' in cr:
+                return int(cr.split('/')[-1]), True
+            return int(resp.headers.get('Content-Length') or 0), False
+    except Exception:
+        return 0, False
+
+
+def _download_single(entry, part, dest):
     digest = hashlib.sha256()
     done = 0
     started = time.time()
-    print(f'boot-models: GET {dest} <- {entry["url"]}', flush=True)
     with open_stream(entry['url']) as resp, open(part, 'wb') as out:
         while True:
             chunk = resp.read(16 * 1024 * 1024)
@@ -102,10 +106,82 @@ def download(entry):
             prev, done = done, done + len(chunk)
             if done // 1_000_000_000 != prev // 1_000_000_000:
                 print(f'boot-models: ... {dest} {done / 1e9:.1f}GB @ {done / 1e6 / max(1, time.time() - started):.0f}MB/s', flush=True)
+    return done, digest.hexdigest()
+
+
+def _download_segmented(entry, part, dest, size):
+    """Ranged parallel download into a preallocated file (os.pwrite per
+    segment). Returns (bytes, sha256-of-file-reread)."""
+    started = time.time()
+    progress = {'done': 0}
+    errors = []
+    lock = threading.Lock()
+    bounds = [(size * i // SEGMENTS, size * (i + 1) // SEGMENTS - 1) for i in range(SEGMENTS)]
+    with open(part, 'wb') as f:
+        f.truncate(size)
+    fd = os.open(part, os.O_WRONLY)
+    try:
+        def fetch(lo, hi):
+            try:
+                offset = lo
+                with open_stream(entry['url'], {'Range': f'bytes={lo}-{hi}'}) as resp:
+                    if resp.status != 206:
+                        raise RuntimeError(f'expected 206, got {resp.status}')
+                    while True:
+                        chunk = resp.read(8 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        os.pwrite(fd, chunk, offset)
+                        offset += len(chunk)
+                        with lock:
+                            prev = progress['done']
+                            progress['done'] += len(chunk)
+                            if progress['done'] // 1_000_000_000 != prev // 1_000_000_000:
+                                print(f'boot-models: ... {dest} {progress["done"] / 1e9:.1f}GB @ {progress["done"] / 1e6 / max(1, time.time() - started):.0f}MB/s ({SEGMENTS} streams)', flush=True)
+                if offset != hi + 1:
+                    raise RuntimeError(f'segment {lo}-{hi} short: ended at {offset}')
+            except Exception as err:
+                errors.append(f'{lo}-{hi}: {err}')
+        threads = [threading.Thread(target=fetch, args=b) for b in bounds]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        os.close(fd)
+    if errors:
+        raise RuntimeError(f'{dest}: segment failures: {errors[:3]}')
+    sha = ''
+    if entry.get('sha256'):
+        digest = hashlib.sha256()
+        with open(part, 'rb') as f:
+            for chunk in iter(lambda: f.read(64 * 1024 * 1024), b''):
+                digest.update(chunk)
+        sha = digest.hexdigest()
+    return progress['done'], sha
+
+
+def download(entry):
+    dest = entry['dest'].lstrip('/')
+    final = ROOT / dest
+    size = entry.get('size')
+    if final.exists() and (final.stat().st_size == size if size else final.stat().st_size > 0):
+        print(f'boot-models: SKIP {dest}', flush=True)
+        return
+    final.parent.mkdir(parents=True, exist_ok=True)
+    part = final.with_suffix(final.suffix + '.part')
+    started = time.time()
+    real_size, ranged = _probe(entry['url'])
+    size = size or real_size or None
+    print(f'boot-models: GET {dest} <- {entry["url"]} ({(size or 0) / 1e9:.1f}GB, ranges={ranged})', flush=True)
+    if ranged and size and size >= SEGMENT_MIN_BYTES and SEGMENTS > 1:
+        done, sha = _download_segmented(entry, part, dest, size)
+    else:
+        done, sha = _download_single(entry, part, dest)
     if size and done != size:
         part.unlink(missing_ok=True)
         raise RuntimeError(f'{dest}: size mismatch {done} != {size}')
-    if entry.get('sha256') and digest.hexdigest() != entry['sha256']:
+    if entry.get('sha256') and sha and sha != entry['sha256']:
         part.unlink(missing_ok=True)
         raise RuntimeError(f'{dest}: sha256 mismatch')
     if done == 0:
