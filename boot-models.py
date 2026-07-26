@@ -51,7 +51,7 @@ def download(entry):
     final.parent.mkdir(parents=True, exist_ok=True)
     part = final.with_suffix(final.suffix + '.part')
     url = entry['url']
-    if CIVITAI_TOKEN and 'civitai.com' in url:
+    if CIVITAI_TOKEN and ('civitai.com' in url or 'civitai.red' in url):
         url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
     req = urllib.request.Request(url)
     if HF_TOKEN and 'huggingface.co' in url:
