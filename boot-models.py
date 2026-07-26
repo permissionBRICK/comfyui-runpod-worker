@@ -18,6 +18,38 @@ from pathlib import Path
 ROOT = Path(os.environ.get('COMFY_MODELS_ROOT', '/comfyui/models'))
 HF_TOKEN = os.environ.get('HF_TOKEN', '')
 CIVITAI_TOKEN = os.environ.get('CIVITAI_TOKEN', '')
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
+
+
+class _Redirect(Exception):
+    def __init__(self, url):
+        self.url = url
+
+
+class _RaiseOnRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise _Redirect(newurl)
+
+
+def open_stream(url):
+    """Opens a download stream with per-host auth. GitHub release assets 302 to
+    a signed CDN URL that must be fetched WITHOUT the Authorization header."""
+    if CIVITAI_TOKEN and ('civitai.com' in url or 'civitai.red' in url):
+        url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
+    if GITHUB_TOKEN and 'api.github.com' in url:
+        req = urllib.request.Request(url, headers={
+            'Authorization': f'Bearer {GITHUB_TOKEN}',
+            'Accept': 'application/octet-stream',
+        })
+        opener = urllib.request.build_opener(_RaiseOnRedirect())
+        try:
+            return opener.open(req, timeout=180)
+        except _Redirect as r:
+            return urllib.request.urlopen(r.url, timeout=180)
+    req = urllib.request.Request(url)
+    if HF_TOKEN and 'huggingface.co' in url:
+        req.add_header('Authorization', f'Bearer {HF_TOKEN}')
+    return urllib.request.urlopen(req, timeout=180)
 
 LEGACY = [
     {'group': 'flux', 'url': 'https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-BF16.gguf',
@@ -60,7 +92,7 @@ def download(entry):
     done = 0
     started = time.time()
     print(f'boot-models: GET {dest} <- {entry["url"]}', flush=True)
-    with urllib.request.urlopen(req, timeout=180) as resp, open(part, 'wb') as out:
+    with open_stream(entry['url']) as resp, open(part, 'wb') as out:
         while True:
             chunk = resp.read(16 * 1024 * 1024)
             if not chunk:
