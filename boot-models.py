@@ -67,7 +67,9 @@ def download(entry):
                 break
             out.write(chunk)
             digest.update(chunk)
-            done += len(chunk)
+            prev, done = done, done + len(chunk)
+            if done // 1_000_000_000 != prev // 1_000_000_000:
+                print(f'boot-models: ... {dest} {done / 1e9:.1f}GB @ {done / 1e6 / max(1, time.time() - started):.0f}MB/s', flush=True)
     if size and done != size:
         part.unlink(missing_ok=True)
         raise RuntimeError(f'{dest}: size mismatch {done} != {size}')
@@ -97,7 +99,7 @@ def main():
     print(f'boot-models: {len(todo)} files', flush=True)
     for entry in todo:
         download_with_retries(entry)
-    print('boot-models: READY', flush=True)
+    print('boot-models: READY - handing over to ComfyUI (torch import takes 1-3 min with no output)', flush=True)
 
 
 if __name__ == '__main__':
