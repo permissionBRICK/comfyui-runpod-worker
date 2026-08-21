@@ -23,7 +23,11 @@ GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 # CDNs serve ~10-20MB/s per connection for cache-cold files; ranged parallel
 # segments multiply that. 1 disables.
 SEGMENTS = int(os.environ.get('DOWNLOAD_SEGMENTS', '8'))
-SEGMENT_MIN_BYTES = 1024 ** 3  # single stream below 1GB
+# Segment parallel downloads for anything this big or larger; leave small
+# files (VAE, LoRA) on a single stream.
+SEGMENT_MIN_BYTES = int(os.environ.get('DOWNLOAD_SEGMENT_MIN_BYTES', 1024 ** 3))
+# Cloudflare on civitai rejects Python's default UA (error 1010 -> 403).
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
 
 class _Redirect(Exception):
@@ -39,7 +43,7 @@ class _RaiseOnRedirect(urllib.request.HTTPRedirectHandler):
 def open_stream(url, headers=None):
     """Opens a download stream with per-host auth. GitHub release assets 302 to
     a signed CDN URL that must be fetched WITHOUT the Authorization header."""
-    extra = dict(headers or {})
+    extra = {'User-Agent': UA, **(headers or {})}
     if CIVITAI_TOKEN and ('civitai.com' in url or 'civitai.red' in url):
         url += ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
     if GITHUB_TOKEN and 'api.github.com' in url:
