@@ -18,8 +18,9 @@ RUN git clone -q --depth 1 https://github.com/city96/ComfyUI-GGUF /comfyui/custo
 
 # C toolchain for torch.compile (inductor builds triton kernels via gcc at
 # first sampling call; otherwise the TorchCompileModel node fails with
-# "Failed to find C compiler").
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+# "Failed to find C compiler"). Python headers are needed too since triton
+# builds a helper extension module.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Boot-time model downloader (MODEL_MANIFEST / MODELS env), used by lazy pods.
