@@ -14,6 +14,7 @@ import os
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(os.environ.get('COMFY_MODELS_ROOT', '/comfyui/models'))
@@ -238,8 +239,13 @@ def download_with_retries(entry, attempts=3):
 def main():
     todo = entries()
     print(f'boot-models: {len(todo)} files', flush=True)
-    for entry in todo:
-        download_with_retries(entry)
+    # Download files in parallel (limited to avoid saturating the pod's
+    # network or the pod's disk write throughput).
+    max_workers = int(os.environ.get('DOWNLOAD_FILE_WORKERS', '3'))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(download_with_retries, e): e for e in todo}
+        for fut in as_completed(futures):
+            fut.result()  # propagate exceptions
     print('boot-models: READY - handing over to ComfyUI (torch import takes 1-3 min with no output)', flush=True)
 
 
