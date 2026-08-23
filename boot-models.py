@@ -40,6 +40,23 @@ class _RaiseOnRedirect(urllib.request.HTTPRedirectHandler):
         raise _Redirect(newurl)
 
 
+# Segment idle timeout: if a ranged read doesn't yield data for this long,
+# kill the segment and retry it. Prevents the whole download from hanging on
+# a stalled connection.
+SEGMENT_IDLE_TIMEOUT = 45  # seconds
+
+
+def _read_with_timeout(resp, chunk_size=8 * 1024 * 1024):
+    """Read from response with idle timeout. Raises TimeoutError if no data
+    arrives within SEGMENT_IDLE_TIMEOUT seconds."""
+    import select
+    fd = resp.fileno()
+    ready, _, _ = select.select([fd], [], [], SEGMENT_IDLE_TIMEOUT)
+    if not ready:
+        raise TimeoutError('segment read timed out')
+    return resp.read(chunk_size)
+
+
 def open_stream(url, headers=None):
     """Opens a download stream with per-host auth. GitHub release assets 302 to
     a signed CDN URL that must be fetched WITHOUT the Authorization header."""
@@ -132,7 +149,7 @@ def _download_segmented(entry, part, dest, size):
                     if resp.status != 206:
                         raise RuntimeError(f'expected 206, got {resp.status}')
                     while True:
-                        chunk = resp.read(8 * 1024 * 1024)
+                        chunk = _read_with_timeout(resp, 8 * 1024 * 1024)
                         if not chunk:
                             break
                         os.pwrite(fd, chunk, offset)
