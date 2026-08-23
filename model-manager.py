@@ -34,11 +34,24 @@ USAGE_FILE = ROOT / '.mm-usage.json'
 MARGIN_BYTES = 2 * 1024 ** 3  # keep this much free after a download
 MIN_EVICT_BYTES = 50 * 1024 ** 2  # only files this large count as models
 
+# Files that must never be LRU-evicted (the boot manifest / active set).
+# Populated from MODEL_MANIFEST at startup; also extended by /ensure priority
+# calls so the active pod's files are always protected.
+def _load_protected():
+    manifest = os.environ.get('MODEL_MANIFEST', '').strip()
+    if manifest:
+        try:
+            return {f['dest'].lstrip('/') for f in json.loads(manifest)}
+        except Exception:
+            pass
+    return set()
+
 state = {
     'queue': [],        # entries waiting for the worker
     'downloading': {},  # dest -> percent (or -1 while size unknown)
     'errors': {},       # dest -> last error string
     'lock': threading.Lock(),
+    'protected': _load_protected(),
 }
 
 
@@ -77,10 +90,11 @@ def free_bytes():
 
 
 def evict_for(needed_bytes, keep):
-    """Deletes least-recently-used model files (not in `keep`) until
-    `needed_bytes` fit. Returns the list of deleted dests."""
+    """Deletes least-recently-used model files (not in `keep` or `state['protected']`)
+    until `needed_bytes` fit. Returns the list of deleted dests."""
     if free_bytes() >= needed_bytes + MARGIN_BYTES:
         return []
+    keep = keep | state['protected']
     usage = load_usage()
     candidates = []
     for dest in present_files():
@@ -183,11 +197,13 @@ class Handler(BaseHTTPRequestHandler):
                 state['errors'].pop(dest, None)
                 fresh.append(f)
                 queued.append(dest)
-            if priority:
-                # A model switch jumps ahead of background prefetch downloads.
-                state['queue'][:0] = fresh
-            else:
-                state['queue'].extend(fresh)
+        if priority:
+            # A model switch jumps ahead of background prefetch downloads.
+            state['queue'][:0] = fresh
+            # Also protect the newly requested files from eviction.
+            state['protected'] |= {f['dest'].lstrip('/') for f in files}
+        else:
+            state['queue'].extend(fresh)
         if queued:
             log('queued:', ', '.join(queued))
         self._reply(200, {'queued': queued, 'present': sorted(present & set(dests))})
