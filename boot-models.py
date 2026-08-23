@@ -47,14 +47,26 @@ SEGMENT_IDLE_TIMEOUT = 45  # seconds
 
 
 def _read_with_timeout(resp, chunk_size=8 * 1024 * 1024):
-    """Read from response with idle timeout. Raises TimeoutError if no data
-    arrives within SEGMENT_IDLE_TIMEOUT seconds."""
-    import select
-    fd = resp.fileno()
-    ready, _, _ = select.select([fd], [], [], SEGMENT_IDLE_TIMEOUT)
-    if not ready:
+    """Read from response with idle timeout. Uses a background thread + queue
+    to enforce the timeout since urllib responses don't expose a fileno()."""
+    import queue
+    q = queue.Queue()
+
+    def _read():
+        try:
+            q.put(resp.read(chunk_size))
+        except Exception as e:
+            q.put(e)
+
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    try:
+        result = q.get(timeout=SEGMENT_IDLE_TIMEOUT)
+    except queue.Empty:
         raise TimeoutError('segment read timed out')
-    return resp.read(chunk_size)
+    if isinstance(result, Exception):
+        raise result
+    return result
 
 
 def open_stream(url, headers=None):
