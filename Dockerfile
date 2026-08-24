@@ -1,27 +1,31 @@
 # RunPod ComfyUI worker/pod image for the SillyTavern image-gen fallback chain.
-# cuda12.8.1 base: Blackwell + Ada GPU support.
-FROM runpod/worker-comfyui:5.8.6-base-cuda12.8.1
+# Keep this aligned with the local 3090 installation: CUDA 13, PyTorch 2.13 and
+# ComfyUI 0.33.1. CUDA 13 enables comfy-kitchen's optimized CUDA backend; the
+# previous CUDA 12.8 image fell back to substantially slower generic kernels.
+FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime
 
-# Pin ComfyUI to match the PC instance (flux2 node classes need >= 0.28;
-# the base ships 0.25).
-# Install into /opt/venv explicitly - that's the env ComfyUI runs from; a bare
-# `uv pip install` targeted a different env, leaving the aux packages
-# (comfyui-frontend-package etc.) at the base image's older pins.
-RUN cd /comfyui && git fetch -q --tags origin && git checkout -q v0.28.0 \
- && /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt
+ARG COMFYUI_VERSION=v0.33.1
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential git python3-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN git clone -q --branch "${COMFYUI_VERSION}" --depth 1 \
+      https://github.com/comfyanonymous/ComfyUI.git /comfyui \
+ && python -m pip install --no-cache-dir -r /comfyui/requirements.txt
 
 # Deterministic custom-node install. comfy-node-install (registry mode) claimed
 # success for comfyui-gguf but the node never appeared in custom_nodes.
 RUN git clone -q --depth 1 https://github.com/city96/ComfyUI-GGUF /comfyui/custom_nodes/ComfyUI-GGUF \
  && git clone -q --depth 1 https://github.com/Acly/comfyui-tooling-nodes /comfyui/custom_nodes/comfyui-tooling-nodes \
- && /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/custom_nodes/ComfyUI-GGUF/requirements.txt
+ && python -m pip install --no-cache-dir -r /comfyui/custom_nodes/ComfyUI-GGUF/requirements.txt
 
-# C toolchain for torch.compile (inductor builds triton kernels via gcc at
-# first sampling call; otherwise the TorchCompileModel node fails with
-# "Failed to find C compiler"). Python headers are needed too since triton
-# builds a helper extension module.
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev \
- && rm -rf /var/lib/apt/lists/*
+# Fail the image build if a dependency resolver silently replaced the CUDA 13
+# PyTorch runtime or installed a different comfy-kitchen release.
+RUN python -c "import importlib.metadata as m, torch; assert torch.__version__.startswith('2.13.0+cu130'), torch.__version__; assert m.version('comfy-kitchen') == '0.2.31'"
+
+WORKDIR /comfyui
 
 # Boot-time model downloader (MODEL_MANIFEST / MODELS env), used by lazy pods.
 COPY boot-models.py /boot-models.py

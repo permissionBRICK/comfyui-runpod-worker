@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_latest:
+        description: Also publish the tested image as latest
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -23,7 +29,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build
-        run: docker build --progress=plain -t ghcr.io/permissionbrick/comfyui-runpod-worker:latest .
-      - name: Push
-        run: docker push ghcr.io/permissionbrick/comfyui-runpod-worker:latest
+      - name: Build candidate
+        run: |
+          docker build --progress=plain \
+            -t ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate \
+            -t ghcr.io/permissionbrick/comfyui-runpod-worker:${GITHUB_SHA} .
+      - name: Push candidate
+        run: |
+          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate
+          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:${GITHUB_SHA}
+      - name: Publish tested image as latest
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_latest
+        run: |
+          docker tag ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate \
+            ghcr.io/permissionbrick/comfyui-runpod-worker:latest
+          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:latest
