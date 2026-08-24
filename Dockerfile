@@ -8,8 +8,11 @@ ARG COMFYUI_VERSION=v0.33.1
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      build-essential git python3-dev \
+      build-essential git python3-dev python3-venv \
  && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv --system-site-packages /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
 RUN git clone -q --branch "${COMFYUI_VERSION}" --depth 1 \
       https://github.com/comfyanonymous/ComfyUI.git /comfyui \
