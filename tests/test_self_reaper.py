@@ -35,7 +35,19 @@ class SelfReaperTests(unittest.TestCase):
             self.assertFalse(module.should_reap(0, now=1899))
             self.assertTrue(module.should_reap(0, now=1900))
 
-    def test_delete_uses_bearer_token_and_pod_id(self):
+    def test_injected_pod_scoped_key_does_not_enable_reaper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = load_module(tmp)
+            with mock.patch.dict(os.environ, {
+                'RUNPOD_POD_ID': 'pod-123',
+                'RUNPOD_API_KEY': 'injected-pod-scoped-key',
+            }, clear=True), mock.patch.object(module, 'log') as log:
+                module.main()
+            log.assert_called_once_with(
+                'disabled (RUNPOD_POD_ID or dedicated RUNPOD_TERMINATE_API_KEY is missing)'
+            )
+
+    def test_delete_uses_dedicated_bearer_token_and_pod_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             module = load_module(tmp)
             seen = {}
@@ -52,10 +64,10 @@ class SelfReaperTests(unittest.TestCase):
                             method=request.method, timeout=timeout)
                 return Response()
 
-            self.assertTrue(module.terminate_self('pod-123', 'scoped-key', open_request))
+            self.assertTrue(module.terminate_self('pod-123', 'restricted-key', open_request))
             self.assertEqual(seen, {
                 'url': 'https://rest.runpod.io/v1/pods/pod-123',
-                'authorization': 'Bearer scoped-key',
+                'authorization': 'Bearer restricted-key',
                 'method': 'DELETE',
                 'timeout': 60,
             })
