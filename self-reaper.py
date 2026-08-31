@@ -2,9 +2,9 @@
 """Independent dead-man switch for a volumeless RunPod Pod.
 
 RunPod injects RUNPOD_POD_ID, but its injected pod-scoped API key cannot delete
-the Pod (verified against the REST API). The manager may instead pass a
-dedicated restricted Pod-management key as RUNPOD_TERMINATE_API_KEY. A stale
-heartbeat then causes a full DELETE, not the UI's storage-retaining Stop.
+the Pod (verified against the REST API). The manager instead passes its existing
+management key as RUNPOD_TERMINATE_API_KEY when this watchdog is enabled. A
+stale heartbeat then causes a full DELETE, not the UI's storage-retaining Stop.
 """
 import os
 import time
@@ -66,7 +66,7 @@ def main():
     pod_id = os.environ.get('RUNPOD_POD_ID', '')
     api_key = os.environ.get('RUNPOD_TERMINATE_API_KEY', '')
     if not pod_id or not api_key:
-        log('disabled (RUNPOD_POD_ID or dedicated RUNPOD_TERMINATE_API_KEY is missing)')
+        log('disabled (RUNPOD_POD_ID or RUNPOD_TERMINATE_API_KEY is missing)')
         return
 
     started = time.time()

@@ -38,6 +38,6 @@ COPY boot-models.py /boot-models.py
 # is full. Started by the pod start command alongside ComfyUI.
 COPY model-manager.py /model-manager.py
 
-# Optional independent dead-man switch. Uses RunPod's injected Pod ID plus a
-# separately supplied restricted Pod-management key.
+# Optional independent dead-man switch. Uses RunPod's injected Pod ID plus the
+# management key supplied by the controlling server when reaping is enabled.
 COPY self-reaper.py /self-reaper.py

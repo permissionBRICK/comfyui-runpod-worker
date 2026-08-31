@@ -11,15 +11,18 @@ The image currently aligns its inference stack with the local RTX 3090 worker:
 - ComfyUI-GGUF and comfyui-tooling-nodes
 - boot-time model downloads from a selected catalog manifest
 - an in-pod model manager for adding and evicting models without recreating the pod
-- an optional independent idle self-reaper using RunPod's injected Pod ID and a dedicated restricted Pod-management key
+- an optional independent idle self-reaper using RunPod's injected Pod ID and the controlling server's management key
 
 Models are downloaded at boot and are not included in the image.
 
 The SillyTavern server plugin remains the authoritative idle watchdog. The
 worker self-reaper is a longer-delay dead-man switch for a lost server or
 network partition. RunPod's injected pod-scoped key cannot delete its own Pod,
-so this is enabled only when the manager supplies `RUNPOD_TERMINATE_API_KEY`.
-Use a separate Restricted key with only Pod access, never a general account key.
+and RunPod cannot publicly mint a key scoped to a future on-demand Pod. When
+enabled, the manager therefore supplies its existing key as
+`RUNPOD_TERMINATE_API_KEY`. The worker image and installed custom nodes must be
+treated as trusted code. Disable pod-local reaping in the manager to keep that
+credential out of the Pod.
 
 ## Publishing
 
