@@ -1,8 +1,8 @@
 # ComfyUI RunPod Worker
 
-Private runtime image used by
-[ST-RunPodProxy](https://github.com/permissionBRICK/ST-RunPodProxy) for the
-on-demand cloud tier of the SillyTavern image-generation extension.
+Private runtime image used by the managed RunPod backend in
+[ST-ImageProviderExtensions](https://github.com/permissionBRICK/ST-ImageProviderExtensions)
+for SillyTavern's on-demand cloud image-generation tier.
 
 The image currently aligns its inference stack with the local RTX 3090 worker:
 
@@ -11,8 +11,13 @@ The image currently aligns its inference stack with the local RTX 3090 worker:
 - ComfyUI-GGUF and comfyui-tooling-nodes
 - boot-time model downloads from a selected catalog manifest
 - an in-pod model manager for adding and evicting models without recreating the pod
+- an independent idle self-reaper using RunPod's injected Pod ID and Pod-scoped API key
 
 Models are downloaded at boot and are not included in the image.
+
+The SillyTavern server plugin remains the authoritative idle watchdog. The
+worker self-reaper is a longer-delay dead-man switch for a lost server or
+network partition; it never receives the account-level `RUNPOD_KEY`.
 
 ## Publishing
 

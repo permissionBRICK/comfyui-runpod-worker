@@ -37,3 +37,7 @@ COPY boot-models.py /boot-models.py
 # pod (port 8189) instead of recreating it. LRU-evicts old models when the disk
 # is full. Started by the pod start command alongside ComfyUI.
 COPY model-manager.py /model-manager.py
+
+# Independent dead-man switch. RunPod injects a pod-scoped API key and pod ID;
+# this process uses them to terminate an orphaned volumeless pod.
+COPY self-reaper.py /self-reaper.py

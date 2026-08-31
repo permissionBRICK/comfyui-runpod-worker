@@ -31,6 +31,8 @@ _spec.loader.exec_module(boot_models)
 ROOT = Path(os.environ.get('COMFY_MODELS_ROOT', '/comfyui/models'))
 PORT = int(os.environ.get('MM_PORT', '8189'))
 USAGE_FILE = ROOT / '.mm-usage.json'
+REAPER_ACTIVITY_FILE = Path(os.environ.get('RUNPOD_REAPER_ACTIVITY_FILE', '/tmp/runpod-self-reaper.hb'))
+REAPER_ARMED_FILE = Path(os.environ.get('RUNPOD_REAPER_ARMED_FILE', '/tmp/runpod-self-reaper.armed'))
 MARGIN_BYTES = 2 * 1024 ** 3  # keep this much free after a download
 MIN_EVICT_BYTES = 50 * 1024 ** 2  # only files this large count as models
 
@@ -57,6 +59,15 @@ state = {
 
 def log(*args):
     print('model-manager:', *args, flush=True)
+
+
+def touch_reaper():
+    """Arm and refresh the independent in-pod dead-man switch."""
+    try:
+        REAPER_ACTIVITY_FILE.touch()
+        REAPER_ARMED_FILE.touch()
+    except OSError as err:
+        log('could not touch self-reaper heartbeat:', err)
 
 
 def load_usage():
@@ -160,6 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        touch_reaper()
         if self.path.split('?')[0] != '/status':
             return self._reply(404, {'error': 'not found'})
         with state['lock']:
@@ -174,7 +186,11 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def do_POST(self):
-        if self.path.split('?')[0] != '/ensure':
+        touch_reaper()
+        path = self.path.split('?')[0]
+        if path == '/activity':
+            return self._reply(200, {'ok': True})
+        if path != '/ensure':
             return self._reply(404, {'error': 'not found'})
         try:
             length = int(self.headers.get('Content-Length') or 0)
