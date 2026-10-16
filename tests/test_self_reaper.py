@@ -66,7 +66,7 @@ class SelfReaperTests(unittest.TestCase):
 
             self.assertTrue(module.terminate_self('pod-123', 'management-key', open_request))
             self.assertEqual(seen, {
-                'url': 'https://rest.runpod.io/v1/pods/pod-123',
+                'url': 'https://api.runpod.io/v2/pods/pod-123',
                 'authorization': 'Bearer management-key',
                 'method': 'DELETE',
                 'timeout': 60,

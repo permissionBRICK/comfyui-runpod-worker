@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-API_BASE = os.environ.get('RUNPOD_API_BASE', 'https://rest.runpod.io/v1')
+API_BASE = os.environ.get('RUNPOD_API_BASE', 'https://api.runpod.io/v2')
 ACTIVITY_FILE = Path(os.environ.get('RUNPOD_REAPER_ACTIVITY_FILE', '/tmp/runpod-self-reaper.hb'))
 ARMED_FILE = Path(os.environ.get('RUNPOD_REAPER_ARMED_FILE', '/tmp/runpod-self-reaper.armed'))
 IDLE_SECONDS = int(os.environ.get('RUNPOD_SELF_REAP_SECONDS', '0'))
