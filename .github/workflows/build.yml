@@ -51,15 +51,6 @@ jobs:
             ${{ env.GHCR }}:${{ github.sha }}
             ${{ env.HUB }}:cuda13-candidate
             ${{ env.HUB }}:${{ github.sha }}
-      # zstd layers decompress several times faster than gzip; extraction took
-      # 15-100 s of each cold boot in the probe. Pushed as a separate tag until
-      # RunPod hosts are confirmed to pull it.
-      - name: Push zstd candidate
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          provenance: false
-          outputs: type=registry,"name=${{ env.GHCR }}:cuda13-candidate-zstd,${{ env.HUB }}:cuda13-candidate-zstd",compression=zstd,force-compression=true,oci-mediatypes=true
       - name: Publish tested image as latest
         if: github.event_name == 'workflow_dispatch' && inputs.publish_latest
         run: |
