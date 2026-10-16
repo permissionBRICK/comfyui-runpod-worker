@@ -11,6 +11,10 @@ on:
         type: boolean
         default: false
 
+env:
+  GHCR: ghcr.io/permissionbrick/comfyui-runpod-worker
+  HUB: docker.io/permissionbrick/comfyui-runpod-worker
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,18 +33,36 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build candidate
-        run: |
-          docker build --progress=plain \
-            -t ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate \
-            -t ghcr.io/permissionbrick/comfyui-runpod-worker:${GITHUB_SHA} .
-      - name: Push candidate
-        run: |
-          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate
-          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:${GITHUB_SHA}
+      # Docker Hub copy: RunPod hosts pulled ghcr at 40-62 MB/s even on
+      # 6-7 Gbit uplinks, Docker Hub images at ~280 MB/s (2026-10-16 probe).
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push candidate (gzip layers)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.GHCR }}:cuda13-candidate
+            ${{ env.GHCR }}:${{ github.sha }}
+            ${{ env.HUB }}:cuda13-candidate
+            ${{ env.HUB }}:${{ github.sha }}
+      # zstd layers decompress several times faster than gzip; extraction took
+      # 15-100 s of each cold boot in the probe. Pushed as a separate tag until
+      # RunPod hosts are confirmed to pull it.
+      - name: Push zstd candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          provenance: false
+          outputs: type=registry,"name=${{ env.GHCR }}:cuda13-candidate-zstd,${{ env.HUB }}:cuda13-candidate-zstd",compression=zstd,force-compression=true,oci-mediatypes=true
       - name: Publish tested image as latest
         if: github.event_name == 'workflow_dispatch' && inputs.publish_latest
         run: |
-          docker tag ghcr.io/permissionbrick/comfyui-runpod-worker:cuda13-candidate \
-            ghcr.io/permissionbrick/comfyui-runpod-worker:latest
-          docker push ghcr.io/permissionbrick/comfyui-runpod-worker:latest
+          docker buildx imagetools create \
+            -t ${{ env.GHCR }}:latest -t ${{ env.HUB }}:latest \
+            ${{ env.GHCR }}:cuda13-candidate
