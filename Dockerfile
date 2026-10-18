@@ -1,10 +1,13 @@
 # RunPod ComfyUI worker/pod image for the SillyTavern image-gen fallback chain.
-# Keep this aligned with the local 3090 installation: CUDA 13, PyTorch 2.13 and
-# ComfyUI 0.33.1. CUDA 13 enables comfy-kitchen's optimized CUDA backend; the
-# previous CUDA 12.8 image fell back to substantially slower generic kernels.
+# CUDA 13 and PyTorch 2.13 match the local 3090 installation. CUDA 13 enables
+# comfy-kitchen's optimized CUDA backend; the previous CUDA 12.8 image fell back
+# to substantially slower generic kernels.
 FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime
 
-ARG COMFYUI_VERSION=v0.33.1
+# A master commit, not a release: native MOSS-Image support (ComfyUI #17095)
+# is not in a tagged release yet. Move back to a release tag once one has it.
+ARG COMFYUI_COMMIT=c06bf5f569d268b80076e5f44126f87cdf835869
+ARG COMFY_KITCHEN_VERSION=0.2.38
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -14,8 +17,9 @@ RUN apt-get update \
 RUN python -m venv --system-site-packages /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-RUN git clone -q --branch "${COMFYUI_VERSION}" --depth 1 \
-      https://github.com/comfyanonymous/ComfyUI.git /comfyui \
+RUN git init -q /comfyui \
+ && git -C /comfyui fetch -q --depth 1 https://github.com/comfyanonymous/ComfyUI.git "${COMFYUI_COMMIT}" \
+ && git -C /comfyui checkout -q FETCH_HEAD \
  && python -m pip install --no-cache-dir -r /comfyui/requirements.txt
 
 # Deterministic custom-node install. comfy-node-install (registry mode) claimed
@@ -26,7 +30,7 @@ RUN git clone -q --depth 1 https://github.com/city96/ComfyUI-GGUF /comfyui/custo
 
 # Fail the image build if a dependency resolver silently replaced the CUDA 13
 # PyTorch runtime or installed a different comfy-kitchen release.
-RUN python -c "import importlib.metadata as m, torch; assert torch.__version__.startswith('2.13.0+cu130'), torch.__version__; assert m.version('comfy-kitchen') == '0.2.31'"
+RUN python -c "import importlib.metadata as m, torch; assert torch.__version__.startswith('2.13.0+cu130'), torch.__version__; assert m.version('comfy-kitchen') == '${COMFY_KITCHEN_VERSION}'"
 
 WORKDIR /comfyui
 
